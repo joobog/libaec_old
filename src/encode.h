@@ -39,8 +39,10 @@
 #ifndef ENCODE_H
 #define ENCODE_H 1
 
+#include "vector.h"
 #include "config.h"
 #include <stdint.h>
+#include <stddef.h>
 
 #define M_CONTINUE 1
 #define M_EXIT 0
@@ -140,6 +142,12 @@ struct internal_state {
 
     /* length of uncompressed CDS */
     uint32_t uncomp_len;
+
+    /* Initial buffer address of the output buffer */
+    unsigned char *next_out_start;
+    size_t avail_out_start;
+
+    struct vector_t *offsets;
 };
 
 #endif /* ENCODE_H */

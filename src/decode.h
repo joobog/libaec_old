@@ -39,9 +39,9 @@
 #ifndef DECODE_H
 #define DECODE_H 1
 
-#include "config.h"
 #include <stdint.h>
 #include <stddef.h>
+#include "vector.h"
 
 #define M_CONTINUE 1
 #define M_EXIT 0
@@ -120,6 +120,14 @@ struct internal_state {
 
     /* table for decoding second extension option */
     int se_table[2 * (SE_TABLE_SIZE + 1)];
+
+    /* start address of the input buffer */
+    const unsigned char *next_in_start;
+    size_t avail_in_start;
+
+    /* RSI table */
+    struct vector_t *offsets;
+    size_t cds_count;
 } decode_state;
 
 #endif /* DECODE_H */

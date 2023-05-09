@@ -36,7 +36,7 @@
  *
  */
 
-#include "config.h"
+/*#include "config.h"*/
 #include "encode.h"
 #include "encode_accessors.h"
 #include "libaec.h"
@@ -46,6 +46,8 @@
 
 static int m_get_block(struct aec_stream *strm);
 
+// data: integer where LSBs should be emitted
+// bits: number of bits to emit
 static inline void emit(struct internal_state *state,
                         uint32_t data, int bits)
 {
@@ -53,6 +55,8 @@ static inline void emit(struct internal_state *state,
        Emit sequence of bits.
      */
 
+    // state->bits is the number of available bits in cds
+    //
     if (bits <= state->bits) {
         state->bits -= bits;
         *state->cds += (uint8_t)(data << state->bits);
@@ -411,6 +415,7 @@ static uint32_t assess_se_option(struct aec_stream *strm)
         if (len > state->uncomp_len)
             return UINT32_MAX;
     }
+
     return (uint32_t)len;
 }
 
@@ -699,6 +704,7 @@ static int m_get_block(struct aec_stream *strm)
 
     init_output(strm);
 
+
     if (state->block_nonzero) {
         state->block_nonzero = 0;
         state->mode = m_select_code_option;
@@ -709,6 +715,9 @@ static int m_get_block(struct aec_stream *strm)
         state->blocks_avail = strm->rsi - 1;
         state->block = state->data_pp;
         state->blocks_dispensed = 1;
+        if (state->offsets != NULL) {
+            vector_push_back(state->offsets, (state->avail_out_start - strm->avail_out) * 8 + (8 - state->bits));
+        }
 
         if (strm->avail_in >= state->rsi_len) {
             state->get_rsi(strm);
@@ -883,6 +892,10 @@ int aec_encode_init(struct aec_stream *strm)
     state->bits = 8;
     state->mode = m_get_block;
 
+    state->next_out_start = strm->next_out;
+    state->avail_out_start = strm->avail_out;
+
+    struct vector_t *offsets = NULL;
     return AEC_OK;
 }
 
@@ -922,7 +935,31 @@ int aec_encode_end(struct aec_stream *strm)
     if (state->flush == AEC_FLUSH && state->flushed == 0)
         status = AEC_STREAM_ERROR;
     cleanup(strm);
+    if ((state->offsets != NULL) && (vector_size(state->offsets) > 0)) {
+        vector_pop_back(state->offsets);
+    }
     return status;
+}
+
+int aec_buffer_encode_with_offsets(struct aec_stream *strm, struct vector_t *offsets)
+{
+    int status = aec_encode_init(strm);
+    if (status != AEC_OK)
+        return status;
+
+    aec_encode_enable_offsets(strm, offsets);
+
+    status = aec_encode(strm, AEC_FLUSH);
+    aec_encode_end(strm);
+    return status;
+}
+
+int aec_encode_enable_offsets(struct aec_stream *strm, struct vector_t *offsets) {
+    struct internal_state *state = strm->state;
+    state->offsets = offsets;
+    /*vector_push_back(offsets, 0);*/
+    /*state->state->cds_count++;*/
+    return AEC_OK;
 }
 
 int aec_buffer_encode(struct aec_stream *strm)

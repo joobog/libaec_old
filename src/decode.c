@@ -42,6 +42,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 
 #if HAVE_BSR64
 #include <intrin.h>
@@ -51,6 +52,11 @@
 #define RSI_USED_SIZE(state) ((size_t)(state->rsip - state->rsi_buffer))
 #define BUFFERSPACE(strm) (strm->avail_in >= strm->state->in_blklen      \
                            && strm->avail_out >= strm->state->out_blklen)
+
+
+
+
+
 
 #define FLUSH(KIND)                                                      \
     static void flush_##KIND(struct aec_stream *strm)                    \
@@ -389,6 +395,12 @@ static inline int m_id(struct aec_stream *strm)
 static int m_next_cds(struct aec_stream *strm)
 {
     struct internal_state *state = strm->state;
+
+    if ((state->offsets != NULL) && ((state->cds_count % strm->rsi) == 0)) {
+        vector_push_back(state->offsets, state->avail_in_start * 8 - (strm->avail_in * 8 + state->bitp));
+    }
+    state->cds_count++;
+
     if (state->rsi_size == RSI_USED_SIZE(state)) {
         state->flush_output(strm);
         state->flush_start = state->rsi_buffer;
@@ -523,6 +535,7 @@ static int m_zero_block(struct aec_stream *strm)
         state->rsip += zero_samples;
         strm->avail_out -= zero_bytes;
         state->mode = m_next_cds;
+        strm->state->cds_count++;
     } else {
         state->sample_counter = zero_samples;
         state->mode = m_zero_output;
@@ -661,6 +674,14 @@ static void create_se_table(int *table)
     }
 }
 
+int aec_decode_enable_offsets(struct aec_stream *strm, struct vector_t *offsets) {
+    struct internal_state *state = strm->state;
+    state->offsets = offsets;
+    vector_push_back(offsets, 0);
+    strm->state->cds_count++;
+    return AEC_OK;
+}
+
 int aec_decode_init(struct aec_stream *strm)
 {
     struct internal_state *state;
@@ -766,6 +787,13 @@ int aec_decode_init(struct aec_stream *strm)
     state->bitp = 0;
     state->fs = 0;
     state->mode = m_id;
+
+    state->avail_in_start = strm->avail_in;
+    state->next_in_start = strm->next_in;
+    state->cds_count = 0;
+
+    state->offsets = NULL;
+
     return AEC_OK;
 }
 
@@ -812,8 +840,24 @@ int aec_decode_end(struct aec_stream *strm)
     free(state->id_table);
     free(state->rsi_buffer);
     free(state);
+
     return AEC_OK;
 }
+
+
+int aec_buffer_decode_with_offsets(struct aec_stream *strm, struct vector_t *offsets)
+{
+    int status = aec_decode_init(strm);
+    if (status != AEC_OK)
+        return status;
+
+    aec_decode_enable_offsets(strm, offsets);
+
+    status = aec_decode(strm, AEC_FLUSH);
+    aec_decode_end(strm);
+    return status;
+}
+
 
 int aec_buffer_decode(struct aec_stream *strm)
 {
@@ -825,6 +869,88 @@ int aec_buffer_decode(struct aec_stream *strm)
     aec_decode_end(strm);
     return status;
 }
+
+
+/*static int bytes_per_sample(int bits_per_sample) {*/
+/*    int input_bytes = 0;*/
+/*    if (bits_per_sample > 0 && bits_per_sample <= 8) {*/
+/*        input_bytes = 1;*/
+/*    }*/
+/*    else if (bits_per_sample > 8 && bits_per_sample <= 16) {*/
+/*        input_bytes = 2;*/
+/*    }*/
+/*    else if (bits_per_sample > 16 && bits_per_sample <= 32) {*/
+/*        input_bytes = 4;*/
+/*    }*/
+/*    else {*/
+/*        printf("get_input_bytes(): Unsupported bits per sample: %d\n", bits_per_sample);*/
+/*        exit(1);*/
+/*    }*/
+/*    return input_bytes;*/
+/*}*/
+
+
+int aec_rsi_at(struct aec_stream *strm, struct vector_t *offsets, size_t idx)
+{
+    struct internal_state *state = strm->state;
+
+    assert(offsets != NULL);
+    assert(idx < vector_size(offsets));
+
+    int status = 0;
+    size_t offset = vector_at(offsets, idx);
+
+    /*strm->avail_out = strm->rsi * strm->block_size * bytes_per_sample(strm->bits_per_sample); */
+    strm->avail_out = strm->rsi * strm->block_size * state->bytes_per_sample; 
+
+    if ((status = aec_decode_init(strm)) != AEC_OK)
+        return status;
+    if ((status = aec_buffer_seek(strm, offset / 8, offset % 8)) != AEC_OK) 
+        return status;
+    if ((status = aec_decode(strm, AEC_FLUSH)) != AEC_OK) 
+        return status;
+    aec_decode_end(strm);
+
+    return AEC_OK;
+}
+
+
+int aec_read(struct aec_stream *strm, struct vector_t *offsets, unsigned char* buf, size_t buf_size, size_t pos) 
+{
+    struct internal_state *state = strm->state;
+
+    int status = 0;
+    size_t rsi_size = strm->rsi * strm->block_size; // size in blocks
+    size_t rsi_n = pos / rsi_size; // rsi number
+    size_t rsi_r = pos % rsi_size; // remainder in rsi block
+
+    unsigned char *decoded = malloc(buf_size + rsi_r + 1);
+    if (decoded == NULL) {
+        return AEC_MEM_ERROR;
+    }
+    strm->next_out = decoded;
+    strm->avail_out = buf_size + rsi_r + 1;
+
+    size_t offset = vector_at(offsets, rsi_n);
+
+    status = aec_decode_init(strm);
+    if (status != AEC_OK) {
+        return status;
+    }
+    status = aec_buffer_seek(strm, offset / 8, offset % 8);
+    if (status != AEC_OK) {
+        return status;
+    }
+    if ((status = aec_decode(strm, AEC_FLUSH)) != 0) {
+        return status;
+    }
+    aec_decode_end(strm);
+
+    memcpy(buf, decoded + (pos - rsi_n * rsi_size), buf_size);
+    free(decoded);
+    return AEC_OK;
+}
+
 
 int aec_buffer_seek(struct aec_stream *strm,
                     size_t byte_offset,
