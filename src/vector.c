@@ -1,4 +1,5 @@
-#include "vector.h"
+#include "libaec.h"
+/*#include "vector.h"*/
 #include <stdio.h>
 #include <inttypes.h>
 #include <assert.h>
@@ -163,7 +164,8 @@ size_t vector_pop_back(struct vector_t *vec) {
 void vector_print(struct vector_t *vec) {
   printf("Vector size: %zu\n", vec->size);
   for (size_t i = 0; i < vec->size; i++) {
-    printf("pos: %zu value: %zu bits\n", i, vec->values[i]);
+    /*printf("pos: %zu value: %zu bits\n", i, vec->values[i]);*/
+    printf("value[%zu] = %zu\n", i, vec->values[i]);
   }
 }
 
