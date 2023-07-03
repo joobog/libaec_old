@@ -39,6 +39,7 @@
 #ifndef DECODE_H
 #define DECODE_H 1
 
+#include "config.h"
 #include <stdint.h>
 #include <stddef.h>
 #include "vector.h"

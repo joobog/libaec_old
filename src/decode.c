@@ -53,11 +53,6 @@
 #define BUFFERSPACE(strm) (strm->avail_in >= strm->state->in_blklen      \
                            && strm->avail_out >= strm->state->out_blklen)
 
-
-
-
-
-
 #define FLUSH(KIND)                                                      \
     static void flush_##KIND(struct aec_stream *strm)                    \
     {                                                                    \
@@ -873,25 +868,6 @@ int aec_buffer_decode(struct aec_stream *strm)
     aec_decode_end(strm);
     return status;
 }
-
-
-/*static int bytes_per_sample(int bits_per_sample) {*/
-/*    int input_bytes = 0;*/
-/*    if (bits_per_sample > 0 && bits_per_sample <= 8) {*/
-/*        input_bytes = 1;*/
-/*    }*/
-/*    else if (bits_per_sample > 8 && bits_per_sample <= 16) {*/
-/*        input_bytes = 2;*/
-/*    }*/
-/*    else if (bits_per_sample > 16 && bits_per_sample <= 32) {*/
-/*        input_bytes = 4;*/
-/*    }*/
-/*    else {*/
-/*        printf("get_input_bytes(): Unsupported bits per sample: %d\n", bits_per_sample);*/
-/*        exit(1);*/
-/*    }*/
-/*    return input_bytes;*/
-/*}*/
 
 
 int aec_rsi_at(struct aec_stream *strm, struct vector_t *offsets, size_t idx)

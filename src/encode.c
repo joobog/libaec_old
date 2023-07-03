@@ -36,7 +36,7 @@
  *
  */
 
-/*#include "config.h"*/
+#include "config.h"
 #include "encode.h"
 #include "encode_accessors.h"
 #include "libaec.h"
@@ -934,10 +934,10 @@ int aec_encode_end(struct aec_stream *strm)
     int status = AEC_OK;
     if (state->flush == AEC_FLUSH && state->flushed == 0)
         status = AEC_STREAM_ERROR;
-    cleanup(strm);
     if ((state->offsets != NULL) && (vector_size(state->offsets) > 0)) {
         vector_pop_back(state->offsets);
     }
+    cleanup(strm);
     return status;
 }
 
