@@ -872,7 +872,6 @@ int aec_buffer_decode(struct aec_stream *strm)
 
 int aec_rsi_at(struct aec_stream *strm, struct vector_t *offsets, size_t idx)
 {
-    struct internal_state *state = strm->state;
 
     assert(offsets != NULL);
     assert(idx < vector_size(offsets));
@@ -880,11 +879,12 @@ int aec_rsi_at(struct aec_stream *strm, struct vector_t *offsets, size_t idx)
     int status = 0;
     size_t offset = vector_at(offsets, idx);
 
-    /*strm->avail_out = strm->rsi * strm->block_size * bytes_per_sample(strm->bits_per_sample); */
-    strm->avail_out = strm->rsi * strm->block_size * state->bytes_per_sample; 
 
     if ((status = aec_decode_init(strm)) != AEC_OK)
         return status;
+    struct internal_state *state = strm->state;
+    strm->avail_out = strm->rsi * strm->block_size * state->bytes_per_sample; 
+    /*strm->avail_out = strm->rsi * strm->block_size * bytes_per_sample(strm->bits_per_sample); */
     if ((status = aec_buffer_seek(strm, offset / 8, offset % 8)) != AEC_OK) 
         return status;
     if ((status = aec_decode(strm, AEC_FLUSH)) != AEC_OK) 
