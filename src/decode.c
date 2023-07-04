@@ -870,22 +870,20 @@ int aec_buffer_decode(struct aec_stream *strm)
 }
 
 
-int aec_rsi_at(struct aec_stream *strm, struct vector_t *offsets, size_t idx)
+int aec_rsi_at(struct aec_stream *strm, struct vector_t *rsi_offsets, size_t idx)
 {
-
-    assert(offsets != NULL);
-    assert(idx < vector_size(offsets));
+    assert(rsi_offsets != NULL);
+    assert(idx < vector_size(rsi_offsets));
 
     int status = 0;
-    size_t offset = vector_at(offsets, idx);
-
+    size_t rsi_offset = vector_at(rsi_offsets, idx);
 
     if ((status = aec_decode_init(strm)) != AEC_OK)
         return status;
-    struct internal_state *state = strm->state;
-    strm->avail_out = strm->rsi * strm->block_size * state->bytes_per_sample; 
-    /*strm->avail_out = strm->rsi * strm->block_size * bytes_per_sample(strm->bits_per_sample); */
-    if ((status = aec_buffer_seek(strm, offset / 8, offset % 8)) != AEC_OK) 
+
+    strm->avail_out = strm->rsi * strm->block_size * strm->state->bytes_per_sample; 
+
+    if ((status = aec_buffer_seek(strm, rsi_offset / 8, rsi_offset % 8)) != AEC_OK) 
         return status;
     if ((status = aec_decode(strm, AEC_FLUSH)) != AEC_OK) 
         return status;
@@ -895,25 +893,25 @@ int aec_rsi_at(struct aec_stream *strm, struct vector_t *offsets, size_t idx)
 }
 
 
-int aec_read(struct aec_stream *strm, struct vector_t *offsets, unsigned char* buf, size_t buf_capacity, size_t pos, size_t size) 
+int aec_read(struct aec_stream *strm, struct vector_t *rsi_offsets, unsigned char* buf, size_t count, size_t offset) 
 {
     int status = 0;
     status = aec_decode_init(strm);
     if (status != AEC_OK) {
-        printf("aec_read(): aec_decode_init() failed with status %d\n", status);
+        fprintf(stderr, "aec_read(): aec_decode_init() failed with status %d\n", status);
         return status;
     }
 
     struct internal_state *state = strm->state;
     size_t rsi_size = strm->rsi * strm->block_size * state->bytes_per_sample; // rsi size in bytes
-    size_t rsi_n = pos / rsi_size; // rsi number
-    if (rsi_n >= vector_size(offsets)) {
-        printf("aec_read(): rsi_n >= vector_size(offsets)\n");
+    size_t rsi_n = offset / rsi_size; // rsi number
+    if (rsi_n >= vector_size(rsi_offsets)) {
+        fprintf(stderr, "aec_read(): rsi_n >= vector_size(rsi_offsets)\n");
         return AEC_DATA_ERROR;
     }
-    size_t rsi_r = pos % rsi_size; // remainder in rsi block
+    size_t rsi_r = offset % rsi_size; // remainder in the rsi block
 
-    size_t decoded_size = size + rsi_r + 1;
+    size_t decoded_size = count + rsi_r + 1;
     decoded_size += state->bytes_per_sample - decoded_size % state->bytes_per_sample; // align to bytes_per_sample
 
     unsigned char *decoded = malloc(decoded_size);
@@ -923,24 +921,20 @@ int aec_read(struct aec_stream *strm, struct vector_t *offsets, unsigned char* b
     strm->next_out = decoded;
     strm->avail_out = decoded_size;
 
-    size_t offset = vector_at(offsets, rsi_n);
+    size_t rsi_offset = vector_at(rsi_offsets, rsi_n);
 
-    status = aec_buffer_seek(strm, offset / 8, offset % 8);
+    status = aec_buffer_seek(strm, rsi_offset / 8, rsi_offset % 8);
     if (status != AEC_OK) {
-        printf("aec_read(): aec_buffer_seek() failed with status %d\n", status);
+        fprintf(stderr, "aec_read(): aec_buffer_seek() failed with status %d\n", status);
         return status;
     }
     if ((status = aec_decode(strm, AEC_FLUSH)) != 0) {
-        printf("aec_read(): aec_decode() failed with status %d\n", status);
+        fprintf(stderr, "aec_read(): aec_decode() failed with status %d\n", status);
         return status;
     }
     aec_decode_end(strm);
 
-    if (buf_capacity < size) {
-        printf("aec_read(): buf_capacity < size\n");
-        return AEC_MEM_ERROR;
-    }
-    memcpy(buf, decoded + (pos - rsi_n * rsi_size), size);
+    memcpy(buf, decoded + (offset - rsi_n * rsi_size), count);
     free(decoded);
     return AEC_OK;
 }

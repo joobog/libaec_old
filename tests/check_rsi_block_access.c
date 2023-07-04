@@ -44,7 +44,7 @@ static int get_input_bytes(int bits_per_sample) {
         fprintf(stderr, "Invalid bits_per_sample: %d\n", bits_per_sample);
         exit(1);
     }
-    int nbytes =  (bits_per_sample - 1) / 8 + 1;
+    int nbytes =  (bits_per_sample + 7) / 8;
     if (nbytes == 3) nbytes = 4;
     return nbytes;
 }
@@ -294,7 +294,7 @@ static int test_at(struct aec_context *ctx)
     PREPARE_ENCODE(&strm_encode, ctx, flags);
 
     struct aec_stream strm_decode;
-    struct vector_t *offsets = vector_create(); \
+    struct vector_t *offsets = vector_create();
     PREPARE_DECODE_WITH_OFFSETS(&strm_decode, ctx, flags, offsets);
 
     vector_print(offsets);
@@ -336,6 +336,7 @@ static int test_at(struct aec_context *ctx)
 
     vector_print(offsets); 
     vector_destroy(offsets);
+    free(rsi_buf);
     return 0;
 }
 
@@ -379,7 +380,7 @@ int test_read(struct aec_context *ctx)
     size_t read_buf_size = 6;
     unsigned char *read_buf = malloc(read_buf_size);
 
-    if ((err = aec_read(&strm_read, offsets, read_buf, read_buf_size, pos, read_buf_size)) != 0) {
+    if ((err = aec_read(&strm_read, offsets, read_buf, read_buf_size, pos)) != 0) {
         printf("Error: Failed reading chunk of data (%d)\n", err);
     }
 
@@ -394,6 +395,7 @@ int test_read(struct aec_context *ctx)
 
     free(read_buf);
     vector_destroy(offsets);
+    free(rsi_buf);
     return 0;
 }
 
@@ -460,8 +462,8 @@ int main(void)
     ctx.ebuf = malloc(ctx.ebuf_len);
     ctx.dbuf = malloc(ctx.dbuf_len);
 
-    data_generator_zero(&ctx);
-    data_generator_random(&ctx);
+    /*data_generator_zero(&ctx);*/
+    /*data_generator_random(&ctx);*/
     data_generator_incr(&ctx);
 
     status = test_read(&ctx);
