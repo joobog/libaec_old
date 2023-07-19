@@ -1,21 +1,22 @@
 #include "check_aec.h"
-#include "../src/vector.h"
+/*#include "../src/vector.h"*/
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <math.h>
 
-#define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c"
-#define BYTE_TO_BINARY(byte)  \
-  (byte & 0x80 ? '1' : '0'), \
-  (byte & 0x40 ? '1' : '0'), \
-  (byte & 0x20 ? '1' : '0'), \
-  (byte & 0x10 ? '1' : '0'), \
-  (byte & 0x08 ? '1' : '0'), \
-  (byte & 0x04 ? '1' : '0'), \
-  (byte & 0x02 ? '1' : '0'), \
-  (byte & 0x01 ? '1' : '0') 
+/*#define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c"*/
+/*#define BYTE_TO_BINARY(byte)  \*/
+/*  (byte & 0x80 ? '1' : '0'), \*/
+/*  (byte & 0x40 ? '1' : '0'), \*/
+/*  (byte & 0x20 ? '1' : '0'), \*/
+/*  (byte & 0x10 ? '1' : '0'), \*/
+/*  (byte & 0x08 ? '1' : '0'), \*/
+/*  (byte & 0x04 ? '1' : '0'), \*/
+/*  (byte & 0x02 ? '1' : '0'), \*/
+/*  (byte & 0x01 ? '1' : '0') */
 
 static const char* aec_get_error_message(int code)
 {
@@ -39,22 +40,13 @@ static void print_aec_stream_info(struct aec_stream* strm, const char* func)
     fprintf(stderr, "%s() aec_stream.total_out=%lu\n",      func, strm->total_out);
 }
 
-static int get_input_bytes(int bits_per_sample) {
-    if (bits_per_sample < 1 || bits_per_sample > 32) {
-        fprintf(stderr, "Invalid bits_per_sample: %d\n", bits_per_sample);
-        exit(1);
-    }
-    int nbytes =  (bits_per_sample + 7) / 8;
-    if (nbytes == 3) nbytes = 4;
-    return nbytes;
-}
-
 struct aec_context {
     size_t nvalues;
     int flags;
     int rsi;
     int block_size;
     int bits_per_sample;
+    int bytes_per_sample;
     unsigned char * obuf;
     unsigned char * ebuf;
     unsigned char * dbuf;
@@ -64,27 +56,32 @@ struct aec_context {
     size_t ebuf_total;
 };
 
+static int get_input_bytes(struct aec_context *ctx) {
+    if (ctx->flags & AEC_DATA_3BYTE) {
+        printf("AES_DATA_3BYTE is not supported\n");
+        exit(1);
+    }
+    if (ctx->bits_per_sample < 1 || ctx->bits_per_sample > 32) {
+        fprintf(stderr, "Invalid bits_per_sample: %d\n", ctx->bits_per_sample);
+        exit(1);
+    }
+    int nbytes =  (ctx->bits_per_sample + 7) / 8;
+    if (nbytes == 3) nbytes = 4;
+    return nbytes;
+}
 
-/*static void data_generator_zero(struct aec_context *ctx) {*/
-/*    size_t nbytes = get_input_bytes(ctx->bits_per_sample);*/
-/*    if (ctx->obuf_len %= nbytes) {*/
-/*        fprintf(stderr, "Invalid buffer_size: %lu\n", ctx->obuf_len);*/
-/*        exit(1);*/
-/*    }*/
-/*    memset(ctx->obuf, 0, ctx->obuf_len);*/
-/*}*/
+typedef void (*data_generator_t)(struct aec_context *ctx);
 
-
-static void data_generator_zero(struct aec_context *ctx) {
-    size_t nbytes = get_input_bytes(ctx->bits_per_sample);
+static void data_generator_zero(struct aec_context *ctx)
+{
+    size_t nbytes = ctx->bytes_per_sample;
     if (ctx->obuf_len % nbytes) {
         fprintf(stderr, "Invalid buffer_size: %lu\n", ctx->obuf_len);
         exit(1);
     }
 
     size_t nvalues = ctx->obuf_len / nbytes;
-    size_t max_value = 1 << (ctx->bits_per_sample - 1);
-    assert(nvalues < max_value);
+    /*size_t max_value = 1 << (ctx->bits_per_sample - 1);*/
 
     for (size_t i = 0; i < nvalues; i++) {
         size_t value = 0;
@@ -101,21 +98,22 @@ static void data_generator_zero(struct aec_context *ctx) {
 }
 
 
-
-static void data_generator_random(struct aec_context *ctx) {
-    size_t nbytes = get_input_bytes(ctx->bits_per_sample);
+static void data_generator_random(struct aec_context *ctx)
+{
+    size_t nbytes = ctx->bytes_per_sample;
     if (ctx->obuf_len % nbytes) {
         fprintf(stderr, "Invalid buffer_size: %lu\n", ctx->obuf_len);
         exit(1);
     }
 
     size_t nvalues = ctx->obuf_len / nbytes;
-    size_t mask = 0xFFFFFFFF >> (sizeof(mask) * 8 - ctx->bits_per_sample);
+    /*size_t mask = 0xFFFFFFFF >> (sizeof(mask) * 8 - ctx->bits_per_sample);*/
+    size_t mask = (1 << (ctx->bits_per_sample - 1))-1;
 
     for (size_t i = 0; i < nvalues; i++) {
         size_t value = rand() & mask;
         unsigned char *value_p = (unsigned char*) &value;
-        printf("b: ");
+
         for (size_t j = 0; j < nbytes; j++) {
             if (ctx->flags & AEC_DATA_MSB) {
                 ctx->obuf[i * nbytes + j] = value_p[nbytes - j - 1];
@@ -123,15 +121,14 @@ static void data_generator_random(struct aec_context *ctx) {
             else {
                 ctx->obuf[i * nbytes + j] = value_p[j];
             }
-            printf("%02X ", ctx->obuf[i * nbytes + j]);
         }
-        printf("\n");
     }
 }
 
 
-static void data_generator_incr(struct aec_context *ctx) {
-    size_t nbytes = get_input_bytes(ctx->bits_per_sample);
+static void data_generator_incr(struct aec_context *ctx)
+{
+    size_t nbytes = ctx->bytes_per_sample;
     if (ctx->obuf_len % nbytes) {
         fprintf(stderr, "Invalid buffer_size: %lu\n", ctx->obuf_len);
         exit(1);
@@ -139,10 +136,9 @@ static void data_generator_incr(struct aec_context *ctx) {
 
     size_t nvalues = ctx->obuf_len / nbytes;
     size_t max_value = 1 << (ctx->bits_per_sample - 1);
-    assert(nvalues < max_value);
 
     for (size_t i = 0; i < nvalues; i++) {
-        size_t value = i;
+        size_t value = i % max_value;
         unsigned char *value_p = (unsigned char*) &value;
         for (size_t j = 0; j < nbytes; j++) {
             if (ctx->flags & AEC_DATA_MSB) {
@@ -156,7 +152,8 @@ static void data_generator_incr(struct aec_context *ctx) {
 }
 
 
-static void ctx_init(struct aec_context *ctx) {
+static void ctx_init(struct aec_context *ctx)
+{
     ctx->nvalues = 0;
     ctx->flags = 0;
     ctx->rsi = 0;
@@ -169,45 +166,7 @@ static void ctx_init(struct aec_context *ctx) {
     ctx->ebuf_len = 0;
     ctx->dbuf_len = 0;
     ctx->ebuf_total = 0;
-    /*ctx->offsets = NULL;*/
 }
-
-
-int encode(struct aec_context *ctx, struct aec_stream *strm) 
-{
-    printf("%s\n", __PRETTY_FUNCTION__);
-    strm->next_in = ctx->obuf;
-    strm->avail_in = ctx->obuf_len;
-    strm->next_out = ctx->ebuf;
-    strm->avail_out = ctx->ebuf_len;
-
-    int err = 0;
-    if ((err = aec_buffer_encode(strm)) != 0) {
-        printf("ERROR: Encoding failed (%d) %s\n", err, aec_get_error_message(err));
-        return(1);
-    }
-
-    return 0;
-}
-
-
-int decode(struct aec_context *ctx, struct aec_stream *strm, struct vector_t *offsets) 
-{
-    printf("%sX\n", __PRETTY_FUNCTION__);
-    strm->next_in = ctx->ebuf;
-    strm->avail_in = ctx->ebuf_len;
-    strm->next_out = ctx->dbuf;
-    strm->avail_out = ctx->dbuf_len;
-
-    int err = 0;
-    if ((err = aec_buffer_decode_with_offsets(strm, offsets))) {
-        printf("ERROR: DEcoding failed (%d) %s\n", err, aec_get_error_message(err));
-        return(1);
-    }
-    vector_print(offsets);
-    return 0;
-}
-
 
 
 #define PREPARE_ENCODE(strm_e, ctx, flags) \
@@ -220,20 +179,27 @@ int decode(struct aec_context *ctx, struct aec_stream *strm, struct vector_t *of
     (strm_e)->avail_in = (ctx)->obuf_len; \
     (strm_e)->next_out = (ctx)->ebuf; \
     (strm_e)->avail_out = (ctx)->ebuf_len; \
-    int err = 0; \
-    if ((err = aec_buffer_encode((strm_e))) != 0) { \
-        printf("ERROR: Encoding failed (%d) %s\n", err, aec_get_error_message(err)); \
-        exit(1); \
+    int status = 0; \
+    if ((status = aec_buffer_encode((strm_e))) != 0) { \
+        /*printf("ERROR: Encoding: Encoding without offsets failed (%d) %s\n", status, aec_get_error_message(status)); */ \
+        return status; \
     } \
-    for (size_t i = 0; i < (ctx)->obuf_len; ++i) { \
-        if (i % (ctx)->block_size == 0) printf("\n"); \
-        printf("%02x ", (ctx)->obuf[i]); \
+    (ctx)->ebuf_total = (strm_e)->total_out; \
+    \
+    struct aec_stream strm_d; \
+    strm_d = (*strm_e); \
+    strm_d.next_in = (ctx)->ebuf; \
+    strm_d.avail_in = (ctx)->ebuf_total; \
+    strm_d.next_out = (ctx)->dbuf; \
+    strm_d.avail_out = (ctx)->dbuf_len; \
+    if ((status = aec_buffer_decode((&strm_d))) != 0) { \
+        /*printf("ERROR: Decoding: Decoding without offsets failed (%d) %s\n", status, aec_get_error_message(status)); */ \
+        return status; \
     } \
-    printf("\n"); \
 }
 
 
-#define PREPARE_ENCODE_WITH_OFFSETS(strm_eo, ctx, flags, offsets) \
+#define PREPARE_ENCODE_WITH_OFFSETS(strm_eo, ctx, flags, offsets_ptr, offsets_count_ptr) \
 { \
     (strm_eo)->flags = flags; \
     (strm_eo)->rsi = (ctx)->rsi; \
@@ -243,235 +209,295 @@ int decode(struct aec_context *ctx, struct aec_stream *strm, struct vector_t *of
     (strm_eo)->avail_in = (ctx)->obuf_len; \
     (strm_eo)->next_out = (ctx)->ebuf; \
     (strm_eo)->avail_out = (ctx)->ebuf_len; \
-    int err = 0; \
-    if ((err = aec_buffer_encode_with_offsets((strm_eo), (offsets))) != 0) { \
-        printf("ERROR: Encoding failed (%d) %s\n", err, aec_get_error_message(err)); \
-        exit(1); \
+    int status = 0; \
+    if ((status = aec_encode_init((strm_eo))) != AEC_OK) { \
+        /*printf("ERROR: Encoding: Encoding with offsets failed (%d) %s\n", status, aec_get_error_message(status)); */ \
+        return(status); \
     } \
-    for (size_t i = 0; i < (ctx)->obuf_len; ++i) { \
-        if (i % (ctx)->block_size == 0) printf("\n"); \
-        printf("%02x ", (ctx)->obuf[i]); \
+    aec_encode_enable_offsets((strm_eo)); \
+    if ((status = aec_encode((strm_eo), AEC_FLUSH)) != 0) { \
+        /*printf("ERROR: Encoding: Enable offsets failed (%d) %s\n", status, aec_get_error_message(status)); */ \
+        return(status); \
     } \
-    printf("\n"); \
+    aec_encode_count_offsets((strm_eo), (offsets_count_ptr)); \
+    (offsets_ptr) = (size_t*) malloc(sizeof(*(offsets_ptr)) * *(offsets_count_ptr)); \
+    if ((status = aec_encode_get_offsets((strm_eo), (offsets_ptr), *(offsets_count_ptr)))) { \
+        /*printf("ERROR: Encoding: Get offsets failed (%d) %s\n", status, aec_get_error_message(status)); */ \
+        return(status); \
+    } \
+    aec_encode_end((strm_eo)); \
+    ctx->ebuf_total = (strm_eo)->total_out; \
 }
 
 
-#define PREPARE_DECODE_WITH_OFFSETS(strm_do, ctx, flags, offsets) \
+#define PREPARE_DECODE_WITH_OFFSETS(strm_do, ctx, flags, offsets_ptr, offsets_count_ptr) \
 { \
     (strm_do)->flags = (ctx)->flags; \
     (strm_do)->rsi = (ctx)->rsi; \
     (strm_do)->block_size = (ctx)->block_size; \
     (strm_do)->bits_per_sample = (ctx)->bits_per_sample; \
     (strm_do)->next_in = (ctx)->ebuf; \
-    (strm_do)->avail_in = (ctx)->ebuf_len; \
+    (strm_do)->avail_in = (ctx)->ebuf_total; \
     (strm_do)->next_out = (ctx)->dbuf; \
     (strm_do)->avail_out = (ctx)->dbuf_len; \
-    int err = 0; \
-    if ((err = aec_buffer_decode_with_offsets((strm_do), (offsets))) != 0) { \
-        printf("ERROR: Decoding failed (%d) %s\n", err, aec_get_error_message(err)); \
-        exit(1); \
+    if ((status = aec_decode_init((strm_do))) != AEC_OK) { \
+        /*printf("ERROR: Decoding init failed (%d) %s\n", status, aec_get_error_message(status)); */ \
+        return status; \
     } \
+    if ((status = aec_decode_enable_offsets((strm_do))) != AEC_OK) { \
+        /*printf("ERROR: Decoding: Enable offsets failed (%d) %s\n", status, aec_get_error_message(status)); */ \
+        return status; \
+    }; \
+    if ((status = aec_decode((strm_do), AEC_FLUSH)) != AEC_OK) { \
+        /*printf("ERROR: Decoding failed (%d) %s\n", status, aec_get_error_message(status)); */ \
+        return status; \
+    } \
+    if ((status = aec_decode_count_offsets((strm_do), (offsets_count_ptr))) != AEC_OK) { \
+        /*printf("ERROR: Decoding: Count offsets failed  (%d) %s\n", status, aec_get_error_message(status)); */ \
+        return status; \
+    } \
+    (offsets_ptr) = (size_t*) malloc(sizeof(*(offsets_ptr)) * *(offsets_count_ptr)); \
+    if ((status = aec_decode_get_offsets((strm_do), (offsets_ptr), *(offsets_count_ptr))) != AEC_OK) { \
+        /*printf("ERROR: Decoding: Get offsets failed (%d) %s\n", status, aec_get_error_message(status)); */ \
+        return status; \
+    }; \
     for (size_t i = 0; i < (strm_do)->total_out; ++i) { \
-        if (i % (ctx)->block_size == 0) printf("\n"); \
-        printf("%02x/%02x ", (ctx)->dbuf[i], (ctx)->obuf[i]); \
+        assert((ctx)->dbuf[i] == (ctx)->obuf[i]); \
     } \
-    for (size_t i = 0; i < (ctx)->obuf_len; ++i) { \
-        assert((ctx)->obuf[i] == (ctx)->dbuf[i]); \
-    } \
-    printf("\n"); \
+    aec_decode_end((strm_do)); \
 }
 
 
 static int test_at(struct aec_context *ctx) 
 {
-    printf("%s\n", __PRETTY_FUNCTION__);
+    int status = AEC_OK;
     int flags = ctx->flags;
-    int nbytes = get_input_bytes(ctx->bits_per_sample);
-
     unsigned short *obuf = (unsigned short*) ctx->obuf;
 
     struct aec_stream strm_encode;
     PREPARE_ENCODE(&strm_encode, ctx, flags);
 
     struct aec_stream strm_decode;
-    struct vector_t *offsets = vector_create();
-    PREPARE_DECODE_WITH_OFFSETS(&strm_decode, ctx, flags, offsets);
+    size_t *offsets;
+    size_t offsets_count;
+    PREPARE_DECODE_WITH_OFFSETS(&strm_decode, ctx, flags, offsets, &offsets_count);
 
-    vector_print(offsets);
-
-    size_t rsi_len = ctx->rsi * ctx->block_size * nbytes;
+    size_t rsi_len = ctx->rsi * ctx->block_size * ctx->bytes_per_sample;
     unsigned char *rsi_buf = malloc(rsi_len);
-    unsigned rsi_n = ctx->obuf_len / (ctx->rsi * ctx->block_size); // Number of full rsi blocks
-    unsigned rsi_r = ctx->obuf_len % (ctx->rsi * ctx->block_size); // Remainder
+    if (rsi_buf == NULL) {
+        printf("ERROR: Failed to allocate rsi buffer\n");
+        exit(1);
+    }
 
-    int i;
-    for (i = 0; i < vector_size(offsets); ++i) {
+    for (int i = 0; i < offsets_count; ++i) {
         struct aec_stream strm_at;
         strm_at.flags = flags;
         strm_at.rsi = ctx->rsi;
         strm_at.block_size = ctx->block_size;
         strm_at.bits_per_sample = ctx->bits_per_sample;
         strm_at.next_in = ctx->ebuf;
-        strm_at.avail_in = ctx->ebuf_len;
+        strm_at.avail_in = ctx->ebuf_total;
         strm_at.next_out = rsi_buf;
-        strm_at.avail_out = rsi_len;
+        strm_at.avail_out = ctx->dbuf_len - i * rsi_len > rsi_len ? rsi_len : ctx->dbuf_len % rsi_len;
 
-        printf("rsi: %d", i);
-        int status = aec_rsi_at(&strm_at, offsets, i);
-        if (status != AEC_OK) {
+        if ((status = aec_rsi_at(&strm_at, offsets, offsets_count, i)) != AEC_OK) {
             printf("Error: %s\n", aec_get_error_message(status));
-            return status;
+            break;
         }
         for (int j = 0; j < strm_at.total_out; j++) {
-            if (j == ctx->rsi * ctx->block_size * nbytes + j > ctx->obuf_len) {
+            if (j == ctx->rsi * ctx->block_size * ctx->bytes_per_sample + j > ctx->obuf_len) {
                 break;
             }
-            if (j % (ctx->block_size * nbytes) == 0) printf("\n");
-
-            printf("%02x/%02x ", rsi_buf[j], ctx->obuf[i * ctx->block_size * ctx->rsi * nbytes + j]);
-            assert(rsi_buf[j] == ctx->obuf[i * ctx->block_size * ctx->rsi * nbytes + j]);
+            assert(rsi_buf[j] == ctx->obuf[i * ctx->block_size * ctx->rsi * ctx->bytes_per_sample + j]);
         }
-        printf("\n");
     }
 
-    vector_print(offsets); 
-    vector_destroy(offsets);
+    free(offsets);
     free(rsi_buf);
-    return 0;
+    return status;
 }
 
 
 int test_read(struct aec_context *ctx) 
 {
-    printf("%s\n", __PRETTY_FUNCTION__);
+    int status = AEC_OK;
     int flags = ctx->flags;
-    int nbytes = get_input_bytes(ctx->bits_per_sample);
-
-    /*unsigned short *obuf = (unsigned short*) ctx->obuf;*/
 
     struct aec_stream strm_encode;
     PREPARE_ENCODE(&strm_encode, ctx, flags);
 
     struct aec_stream strm_decode;
-    struct vector_t *offsets = vector_create();
-    PREPARE_DECODE_WITH_OFFSETS(&strm_decode, ctx, flags, offsets);
+    size_t *offsets = NULL;
+    size_t offsets_size = 0;
+    PREPARE_DECODE_WITH_OFFSETS(&strm_decode, ctx, flags, offsets, &offsets_size);
 
-    vector_print(offsets);
-
-    size_t rsi_len = ctx->rsi * ctx->block_size * nbytes;
+    size_t rsi_len = ctx->rsi * ctx->block_size * ctx->bytes_per_sample;
     unsigned char *rsi_buf = malloc(rsi_len);
     unsigned rsi_n = ctx->obuf_len / (ctx->rsi * ctx->block_size); // Number of full rsi blocks
     unsigned rsi_r = ctx->obuf_len % (ctx->rsi * ctx->block_size); // Remainder
-    int err = 0;
   
-    // Read data range
-    struct aec_stream strm_read;
-    strm_read.flags = ctx->flags;
-    strm_read.rsi = ctx->rsi;
-    strm_read.block_size = ctx->block_size;
-    strm_read.bits_per_sample = ctx->bits_per_sample;
-    strm_read.avail_in = ctx->ebuf_len;
-    strm_read.next_in = ctx->ebuf; 
-    strm_read.avail_out = ctx->dbuf_len;
-    strm_read.next_out = ctx->dbuf;
-    print_aec_stream_info(&strm_decode, __PRETTY_FUNCTION__);
-
-    size_t pos = 17;
-    size_t read_buf_size = 6;
-    unsigned char *read_buf = malloc(read_buf_size);
-
-    if ((err = aec_read(&strm_read, offsets, read_buf, read_buf_size, pos)) != 0) {
-        printf("Error: Failed reading chunk of data (%d)\n", err);
+    // Edge case: Imposible to get wanted number of slices
+    size_t wanted_num_slices = 3;
+    if (wanted_num_slices > ctx->obuf_len) {
+        wanted_num_slices = ctx->obuf_len;
     }
 
-    for (size_t i = 0; i < read_buf_size; ++i) {
-        printf("%zu: %d %d\n", i, ctx->obuf[i + pos], read_buf[i]);
+    // Optimize the size of the last slice
+    // Make sure that the last slice is not too small
+    size_t slice_size = (ctx->obuf_len % ((ctx->obuf_len / wanted_num_slices) * wanted_num_slices)) == 0 ? ctx->obuf_len / wanted_num_slices : ctx->obuf_len / wanted_num_slices + 1;
+
+    size_t num_slices = ctx->obuf_len / slice_size;
+    size_t remainder = ctx->obuf_len % slice_size;
+
+    size_t slice_offsets[num_slices + 1];
+    size_t slice_sizes[num_slices + 1];
+
+    for (size_t i = 0; i < num_slices; ++i) {
+        slice_offsets[i] = slice_size * i;
+        slice_sizes[i] = slice_size;
+    }
+    if (remainder > 0) {
+        slice_offsets[num_slices] = slice_size * (num_slices - 1);
+        slice_sizes[num_slices] = remainder;
+        ++num_slices;
     }
 
-    for (size_t i = 0; i < read_buf_size; ++i) {
-        printf("assert(%d == %d)\n", ctx->obuf[i + pos], read_buf[i]);
-        assert(ctx->obuf[i + pos] == read_buf[i]);
+    for (size_t i = 0; i < num_slices; ++i) {
+        struct aec_stream strm_read;
+        strm_read.flags = ctx->flags;
+        strm_read.rsi = ctx->rsi;
+        strm_read.block_size = ctx->block_size;
+        strm_read.bits_per_sample = ctx->bits_per_sample;
+        strm_read.avail_in = strm_encode.total_out;
+        strm_read.next_in = ctx->ebuf; 
+        strm_read.avail_out = ctx->dbuf_len;
+        strm_read.next_out = ctx->dbuf;
+
+        unsigned char *read_buf = malloc(slice_sizes[i]);
+        if ((status = aec_read(&strm_read, offsets, offsets_size, read_buf, slice_sizes[i], slice_offsets[i])) != AEC_OK) {
+            print_aec_stream_info(&strm_read, __func__);
+            printf("ctx.bytes_per_sample=%d\n", ctx->bytes_per_sample);
+            printf("Error: Failed reading chunk of data (%d)\n", status);
+            return status;
+        }
+        for (size_t j = 0; j < slice_sizes[i]; ++j) {
+            assert(ctx->obuf[slice_offsets[i] + j] == read_buf[j]);
+        }
+        free(read_buf);
     }
 
-    free(read_buf);
-    vector_destroy(offsets);
+    free(offsets);
     free(rsi_buf);
-    return 0;
+    return status;
 }
 
-
-void write_buffer(unsigned char* buf, size_t buf_len, const char* filename) {
-    printf("%s\n", __PRETTY_FUNCTION__);
-    printf("Writing %zu bytes in %s\n", buf_len, filename);
-    FILE* f = fopen(filename, "wb");
-    fwrite(buf, 1, buf_len, f);
-    fclose(f);
-}
 
 // Tests 
 int test_offsets(struct aec_context *ctx) {
-    printf("%s\n", __PRETTY_FUNCTION__);
+    int status = AEC_OK;
     int flags = ctx->flags;
-    int nbytes = get_input_bytes(ctx->bits_per_sample);
 
-    struct aec_stream strm;
+    struct aec_stream strm1;
+    size_t *encode_offsets_ptr;
+    size_t encode_offsets_size;
+    PREPARE_ENCODE_WITH_OFFSETS(&strm1, ctx, flags, encode_offsets_ptr, &encode_offsets_size);
 
-    struct vector_t *encode_offsets = vector_create();
-    PREPARE_ENCODE_WITH_OFFSETS(&strm, ctx, flags, encode_offsets);
+    struct aec_stream strm2;
+    size_t *decode_offsets_ptr;
+    size_t decode_offsets_size;
+    PREPARE_DECODE_WITH_OFFSETS(&strm2, ctx, flags, decode_offsets_ptr, &decode_offsets_size);
+    size_t size = decode_offsets_size > 10 ? 10 : decode_offsets_size;
 
-    struct vector_t *decode_offsets = vector_create();
-    PREPARE_DECODE_WITH_OFFSETS(&strm, ctx, flags, decode_offsets);
+    for (size_t i = 0; i < encode_offsets_size; ++i) {
+        if (encode_offsets_ptr[i] != decode_offsets_ptr[i]) {
+            printf("Error: encode_offsets_ptr[%zu] = %zu, decode_offsets_ptr[%zu] = %zu\n", i, encode_offsets_ptr[i], i, decode_offsets_ptr[i]);
+            assert(0);
+        }
+    }
 
-    vector_print(encode_offsets);
-    vector_print(decode_offsets);
-
-    assert(vector_equal(encode_offsets, decode_offsets) == 1);
-    free(decode_offsets);
-    free(encode_offsets);
-    return 0;
+    free(decode_offsets_ptr);
+    free(encode_offsets_ptr);
+    return status;
 }
 
 
-
+/*AEC_DATA_SIGNED 1*/
+/*AEC_DATA_3BYTE 2*/
+/*AEC_DATA_MSB 4*/
+/*AEC_DATA_PREPROCESS 8*/
+/*AEC_RESTRICTED 16*/
+/*AEC_PAD_RSI 32*/
+/*AEC_NOT_ENFORCE 64*/
 
 int main(void)
 {
     int status;
-    struct aec_context ctx;
+    size_t ns[] = {1, 255, 256, 255*10, 256*10, 67000};
+    size_t rsis[] = {1, 2, 255, 256, 512, 1024, 4095, 4096};
+    size_t bss[] = {8, 16, 32, 64};
+    size_t bpss[] = {1, 7, 8, 9, 15, 16, 17, 23, 24, 25, 31, 32};
 
-    /*AEC_DATA_SIGNED 1*/
-    /*AEC_DATA_3BYTE 2*/
-    /*AEC_DATA_MSB 4*/
-    /*AEC_DATA_PREPROCESS 8*/
-    /*AEC_RESTRICTED 16*/
-    /*AEC_PAD_RSI 32*/
-    /*AEC_NOT_ENFORCE 64*/
+    data_generator_t data_generators[] = {data_generator_zero, data_generator_random, data_generator_incr};
 
-    ctx.nvalues = 67;
-    /*ctx.flags = AEC_DATA_PREPROCESS | AEC_DATA_MSB; // Default value in ecCodes is 14*/
-    ctx.flags = AEC_DATA_PREPROCESS; // Default value in ecCodes is 14
-    ctx.rsi = 2;
-    ctx.block_size = 16;
-    ctx.bits_per_sample = 29;
-    size_t bytes_per_sample = get_input_bytes(ctx.bits_per_sample);
-    size_t input_size = ctx.nvalues * bytes_per_sample;
-    ctx.obuf_len = input_size;
-    ctx.ebuf_len = input_size * 2;
-    ctx.dbuf_len = input_size;
-    ctx.obuf = malloc(ctx.obuf_len);
-    ctx.ebuf = malloc(ctx.ebuf_len);
-    ctx.dbuf = malloc(ctx.dbuf_len);
+    for (size_t n_i = 0; n_i < sizeof(ns) / sizeof(ns[0]); ++n_i) {
+        for (size_t rsi_i = 0; rsi_i < sizeof(rsis) / sizeof(rsis[0]); ++rsi_i) {
+            for (size_t bs_i = 0; bs_i < sizeof(bss) / sizeof(bss[0]); ++bs_i) {
+                for (size_t bps_i = 0; bps_i < sizeof(bpss) / sizeof(bpss[0]); ++bps_i) {
+                    struct aec_context ctx;
+                    ctx.nvalues = ns[n_i];
+                    ctx.flags = AEC_DATA_PREPROCESS;
+                    ctx.rsi = rsis[rsi_i];
+                    ctx.block_size = bss[bs_i];
+                    ctx.bits_per_sample = bpss[bps_i];
+                    ctx.bytes_per_sample = get_input_bytes(&ctx);
+                    size_t input_size = ctx.nvalues * ctx.bytes_per_sample;
+                    ctx.obuf_len = input_size;
+                    ctx.ebuf_len = input_size * 67 / 64 + 256;
+                    ctx.dbuf_len = input_size;
+                    ctx.obuf = calloc(1, ctx.obuf_len);
+                    ctx.ebuf = calloc(1, ctx.ebuf_len);
+                    ctx.dbuf = calloc(1, ctx.dbuf_len);
+                    if (ctx.obuf == NULL || ctx.ebuf == NULL || ctx.dbuf == NULL) {
+                        printf("Error: Failed allocating memory\n");
+                        return 1;
+                    }
 
-    /*data_generator_zero(&ctx);*/
-    /*data_generator_random(&ctx);*/
-    data_generator_incr(&ctx);
-
-    status = test_read(&ctx);
-    status = test_at(&ctx);
-    status = test_offsets(&ctx);
-
-    free(ctx.obuf);
-    free(ctx.ebuf);
-    free(ctx.dbuf);
+                    for (size_t i = 0; i < sizeof(data_generators) / sizeof(data_generators[0]); ++i) {
+                        data_generators[i](&ctx);
+                        printf("Testing test_at()      ");
+                        printf("nvalues=%zu, rsi=%zu, block_size=%zu, bits_per_sample=%zu ... ", ns[n_i], rsis[rsi_i], bss[bs_i], bpss[bps_i]);
+                        status = test_at(&ctx);
+                        if (status != AEC_OK) {
+                            printf("%s\n", CHECK_FAIL);
+                        }
+                        else {
+                            printf("%s\n", CHECK_PASS);
+                        }
+                        printf("Testing test_read()    ");
+                        printf("nvalues=%zu, rsi=%zu, block_size=%zu, bits_per_sample=%zu ... ", ns[n_i], rsis[rsi_i], bss[bs_i], bpss[bps_i]);
+                        status = test_read(&ctx);
+                        if (status != AEC_OK) {
+                            printf("%s\n", CHECK_FAIL);
+                        }
+                        else {
+                            printf("%s\n", CHECK_PASS);
+                        }
+                        printf("Testing test_offsets() ");
+                        printf("nvalues=%zu, rsi=%zu, block_size=%zu, bits_per_sample=%zu ... ", ns[n_i], rsis[rsi_i], bss[bs_i], bpss[bps_i]);
+                        status = test_offsets(&ctx);
+                        if (status != AEC_OK) {
+                            printf("%s\n", CHECK_FAIL);
+                        }
+                        else {
+                            printf("%s\n", CHECK_PASS);
+                        }
+                    }
+                    free(ctx.obuf);
+                    free(ctx.ebuf);
+                    free(ctx.dbuf);
+                }
+            }
+        }
+    }
     return status;
 }

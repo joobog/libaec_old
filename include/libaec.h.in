@@ -43,11 +43,7 @@
 #define AEC_VERSION_PATCH @PROJECT_VERSION_PATCH@
 #define AEC_VERSION_STR "@PROJECT_VERSION_MAJOR@.@PROJECT_VERSION_MINOR@.@PROJECT_VERSION_PATCH@"
 
-//#include "../src/vector.h"
-
 #include <stddef.h>
-#include <stdint.h>
-#include <stdlib.h>
 
 #ifdef __cplusplus
 extern "C"{
@@ -60,23 +56,6 @@ extern "C"{
 #endif
 
 struct internal_state;
-
-struct vector_t {
-    size_t size;
-    size_t capacity;
-    size_t *values;
-};
-
-LIBAEC_DLL_EXPORTED struct vector_t*  vector_create();
-LIBAEC_DLL_EXPORTED void vector_destroy(struct vector_t* vec);
-LIBAEC_DLL_EXPORTED size_t vector_size(struct vector_t* vec);
-LIBAEC_DLL_EXPORTED void vector_init(struct vector_t* vec, size_t capacity);
-LIBAEC_DLL_EXPORTED void vector_print(struct vector_t *vec);
-LIBAEC_DLL_EXPORTED void vector_push_back(struct vector_t *vec, size_t offset);
-LIBAEC_DLL_EXPORTED size_t vector_pop_back(struct vector_t *vec);
-LIBAEC_DLL_EXPORTED size_t vector_at(struct vector_t *vector, size_t idx);
-LIBAEC_DLL_EXPORTED int vector_equal(struct vector_t *vec1, struct vector_t *vec2);
-
 
 struct aec_stream {
     const unsigned char *next_in;
@@ -147,7 +126,7 @@ struct aec_stream {
 #define AEC_STREAM_ERROR (-2)
 #define AEC_DATA_ERROR (-3)
 #define AEC_MEM_ERROR (-4)
-#define AEC_NOT_IMPLEMENTED (-5)
+#define AEC_RSI_OFFSETS_ERROR (-5);
 
 /************************/
 /* Options for flushing */
@@ -172,27 +151,27 @@ struct aec_stream {
 LIBAEC_DLL_EXPORTED int aec_encode_init(struct aec_stream *strm);
 LIBAEC_DLL_EXPORTED int aec_encode(struct aec_stream *strm, int flush);
 LIBAEC_DLL_EXPORTED int aec_encode_end(struct aec_stream *strm);
-LIBAEC_DLL_EXPORTED int aec_encode_enable_offsets(struct aec_stream *strm, struct vector_t *offsets);
+LIBAEC_DLL_EXPORTED int aec_encode_enable_offsets(struct aec_stream *strm);
+LIBAEC_DLL_EXPORTED int aec_encode_count_offsets(struct aec_stream *strm, size_t *count);
+LIBAEC_DLL_EXPORTED int aec_encode_get_offsets(struct aec_stream *strm, size_t *offsets, size_t offsets_count);
 
 LIBAEC_DLL_EXPORTED int aec_decode_init(struct aec_stream *strm);
 LIBAEC_DLL_EXPORTED int aec_decode(struct aec_stream *strm, int flush);
 LIBAEC_DLL_EXPORTED int aec_decode_end(struct aec_stream *strm);
-LIBAEC_DLL_EXPORTED int aec_decode_enable_offsets(struct aec_stream *strm, struct vector_t *offsets);
+LIBAEC_DLL_EXPORTED int aec_decode_enable_offsets(struct aec_stream *strm);
+LIBAEC_DLL_EXPORTED int aec_decode_count_offsets(struct aec_stream *strm, size_t *count);
+LIBAEC_DLL_EXPORTED int aec_decode_get_offsets(struct aec_stream *strm, size_t *offsets, size_t offsets_count);
 
 /***************************************************************/
 /* Utility functions for encoding or decoding a memory buffer. */
 /***************************************************************/
 LIBAEC_DLL_EXPORTED int aec_buffer_encode(struct aec_stream *strm);
-LIBAEC_DLL_EXPORTED int aec_buffer_encode_with_offsets(struct aec_stream *strm, struct vector_t* offsets);
-
 LIBAEC_DLL_EXPORTED int aec_buffer_decode(struct aec_stream *strm);
-LIBAEC_DLL_EXPORTED int aec_buffer_decode_with_offsets(struct aec_stream *strm, struct vector_t* offsets);
-
 LIBAEC_DLL_EXPORTED int aec_buffer_seek(struct aec_stream *strm,
                                         size_t byte_offset,
                                         unsigned char bit_offset);
-LIBAEC_DLL_EXPORTED int aec_read(struct aec_stream *strm, struct vector_t *rsi_offsets, unsigned char* buf, size_t count, size_t offset);
-LIBAEC_DLL_EXPORTED int aec_rsi_at(struct aec_stream *strm, struct vector_t *offsets, size_t idx);
+LIBAEC_DLL_EXPORTED int aec_read(struct aec_stream *strm, const size_t *offsets, size_t offsets_size, unsigned char* buf, size_t count, size_t offset);
+LIBAEC_DLL_EXPORTED int aec_rsi_at(struct aec_stream *strm, const size_t *offsets, size_t offsets_size, size_t idx);
 
 #ifdef __cplusplus
 }

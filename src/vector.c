@@ -1,5 +1,5 @@
 #include "libaec.h"
-/*#include "vector.h"*/
+#include "vector.h"
 #include <stdio.h>
 #include <inttypes.h>
 #include <assert.h>
@@ -27,7 +27,17 @@ struct vector_t* vector_create() {
     printf("Failed to allocate memory for vector\n");
     return NULL;
   }
-  vector_init(vec, VECTOR_INITIAL_CAPACITY);
+  /*vector_init(vec, VECTOR_INITIAL_CAPACITY);*/
+  vec->capacity = VECTOR_INITIAL_CAPACITY;
+  vec->size = 0;
+
+  // Allocates memory for vector values.
+  vec->values = malloc(sizeof(*vec->values) * vec->capacity);
+
+  // Checks if memory allocation was successful.
+  if (vec->values == NULL) {
+    VECTOR_FATAL_ERROR("Failed to allocate memory for vector values\n");
+  }
   return vec;
 }
 
@@ -44,19 +54,19 @@ size_t vector_size(struct vector_t* vec) {
  * @exception assert Error occurs when capacity is not greater than 0.
  * @exception VECTOR_FATAL_ERROR Error occurs when memory allocation for vector values fails.
  */
-void vector_init(struct vector_t *vec, size_t capacity) {
-  assert(capacity > 0);
-  vec->capacity = capacity;
-  vec->size = 0;
+/*void vector_init(struct vector_t *vec, size_t capacity) {*/
+/*  assert(capacity > 0);*/
+/*  vec->capacity = capacity;*/
+/*  vec->size = 0;*/
 
-  // Allocates memory for vector values.
-  vec->values = malloc(sizeof(*vec->values) * vec->capacity);
+/*  // Allocates memory for vector values.*/
+/*  vec->values = malloc(sizeof(*vec->values) * vec->capacity);*/
 
-  // Checks if memory allocation was successful.
-  if (vec->values == NULL) {
-    VECTOR_FATAL_ERROR("Failed to allocate memory for vector values\n");
-  }
-}
+/*  // Checks if memory allocation was successful.*/
+/*  if (vec->values == NULL) {*/
+/*    VECTOR_FATAL_ERROR("Failed to allocate memory for vector values\n");*/
+/*  }*/
+/*}*/
 
 /**
  * @brief Deallocates the memory used by the vector and the vector itself.
@@ -161,6 +171,12 @@ size_t vector_pop_back(struct vector_t *vec) {
 }
 
 
+size_t* vector_data(struct vector_t *vec) 
+{
+  return vec->values;
+}
+
+
 void vector_print(struct vector_t *vec) {
   printf("Vector size: %zu\n", vec->size);
   for (size_t i = 0; i < vec->size; i++) {
@@ -168,4 +184,3 @@ void vector_print(struct vector_t *vec) {
     printf("value[%zu] = %zu\n", i, vec->values[i]);
   }
 }
-
